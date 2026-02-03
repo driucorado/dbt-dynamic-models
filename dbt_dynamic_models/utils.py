@@ -1,5 +1,5 @@
 # third party
-import dbt.clients.agate_helper
+import agate
 
 
 def get_results_from_sql(
@@ -10,5 +10,5 @@ def get_results_from_sql(
     if fetch:
         table = adapter.connections.get_result_from_cursor(cursor)
     else:
-        table = dbt.clients.agate_helper.empty_table()
+        table = agate.Table.from_object([])
     return response, table
