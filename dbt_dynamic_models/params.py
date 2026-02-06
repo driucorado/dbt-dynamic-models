@@ -18,27 +18,113 @@ class Param:
         self,
         dynamic_model: Dict,
         adapter: Adapter,
+        config=None,
+        manifest=None,
     ):
         self.dynamic_model = dynamic_model
         self.adapter = adapter
-        self.strategy = self.dynamic_model.get('strategy', 'product')
+        self.config = config
+        self.manifest = manifest
+        self.strategy = self.dynamic_model.get("strategy", "product")
 
     STRATEGY_FUNCTION = {
-        'product': product,
-        'row': zip,
+        "product": product,
+        "row": zip,
     }
+
+    def _render_jinja_query(self, query: str) -> str:
+        """Render Jinja templates in param queries using dbt context.
+
+        This allows queries to use dbt functions like:
+        - {{ ref('model_name') }}
+        - {{ env_var('VAR_NAME', 'default') }}
+        - {{ source('schema', 'table') }}
+        - {{ var('variable_name') }}
+        """
+        # If config and manifest aren't provided, return query as-is for backwards compatibility
+        if not self.config or not self.manifest:
+            logger.debug(
+                "Config/manifest not provided, skipping Jinja rendering for query"
+            )
+            return query
+
+        # Check if query contains Jinja syntax
+        if "{{" not in query and "{%" not in query:
+            return query
+
+        try:
+            from dbt_common.clients.jinja import get_template, render_template
+            from dbt.context.providers import generate_runtime_model_context
+
+            # We need a minimal node to generate context
+            # Use an existing SQL node from manifest if available, or create a minimal one
+            sql_nodes = [
+                node
+                for node in self.manifest.nodes.values()
+                if hasattr(node, "resource_type") and node.resource_type == "model"
+            ]
+
+            if sql_nodes:
+                # Use first available model node as context base
+                context_node = sql_nodes[0]
+            else:
+                # Fallback: create a minimal context without a specific node
+                # This is less ideal but works for basic functions
+                from dbt.context.providers import generate_runtime_macro_context
+
+                context = generate_runtime_macro_context(
+                    macro=None,
+                    config=self.config,
+                    manifest=self.manifest,
+                    package_name=self.config.project_name,
+                )
+                template = get_template(query, ctx=context)
+                return render_template(template, context)
+
+            # Generate full runtime context with ref, source, env_var, etc.
+            context = generate_runtime_model_context(
+                model=context_node,
+                config=self.config,
+                manifest=self.manifest,
+            )
+
+            # Render the query with dbt context
+            template = get_template(query, ctx=context)
+            rendered = render_template(template, context, node=context_node)
+
+            logger.debug(f"Rendered query: {rendered}")
+            return rendered
+
+        except Exception as e:
+            logger.warning(f"Failed to render Jinja in query: {e}")
+            logger.warning(f"Falling back to raw query: {query}")
+            return query
 
     def _format_params(self):
         params = {}
-        for param in self.dynamic_model['params']:
-            if 'values' in param:
-                params[param['name']] = param['values']
-            elif 'query' in param:
+        for param in self.dynamic_model["params"]:
+            if "values" in param:
+                params[param["name"]] = param["values"]
+            elif "query" in param:
+                # Render Jinja templates in the query (ref, env_var, source, etc.)
+                rendered_query = self._render_jinja_query(param["query"])
                 response, table = get_results_from_sql(
-                    self.adapter, param['query'], fetch=True
+                    self.adapter, rendered_query, fetch=True
                 )
-                if response.code != 'SUCCESS':
-                    raise ValueError(f'Query unsuccessful: {response}')
+
+                # Log response for debugging
+                logger.debug(
+                    f"Query response code: {response.code}, message: {response._message}"
+                )
+
+                # Check for actual error codes instead of expecting specific success codes
+                # Different adapters return different success codes (SELECT, INSERT, SUCCESS, OK, etc.)
+                if response.code in ["ERROR", "FAIL", "FATAL"]:
+                    raise ValueError(f"Query failed: {response}")
+
+                # Validate that we got usable data back
+                if table is None or len(table.columns) == 0:
+                    raise ValueError(f"Query returned no data. Response: {response}")
 
                 params.update(
                     **{col.name.lower(): col.values() for col in table.columns}
@@ -54,19 +140,19 @@ class Param:
         iterables = [v for k, v in params.items()]
         length = len(iterables[0])
         if any(len(ls) != length for ls in iterables):
-            logger.warning('The parameters are of unequal lengths!')
+            logger.warning("The parameters are of unequal lengths!")
 
     def get_iterable(self):
         params = self._format_params()
 
         # Check params
-        strategy_check = f'{self.strategy}_check'
+        strategy_check = f"{self.strategy}_check"
         getattr(self, strategy_check)(params)
 
         # Hard error for undefined strategies
         func = self.STRATEGY_FUNCTION[self.strategy]
 
         # Get appropriate iterable based on strategy
-        Iterable = namedtuple('Iterable', params.keys())
+        Iterable = namedtuple("Iterable", params.keys())
         named_tuples = starmap(Iterable, func(*params.values()))
         return [named_tuple._asdict() for named_tuple in named_tuples]
