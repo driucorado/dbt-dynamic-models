@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dbt_dynamic_models"
-version = "0.1.3"
+version = "0.1.5"
 description = "Generate dbt models from config"
 authors = ["Doug Guthrie <douglas.p.guthrie@gmail.com>"]
 license = "MIT"
