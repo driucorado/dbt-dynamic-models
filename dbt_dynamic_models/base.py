@@ -89,6 +89,40 @@ class DynamicModel:
                 clean_context[key] = value
         return clean_context
 
+    def _flatten_context(self, context: dict) -> dict:
+        """Flatten nested dict objects for backwards compatibility (deprecated).
+
+        Note: This method is kept for backwards compatibility but is no longer needed
+        since we now use Jinja for all template rendering (name, location, sql).
+
+        Args:
+            context: Dict with potentially nested dict values
+
+        Returns:
+            Same dict (no flattening needed with Jinja)
+        """
+        # With Jinja everywhere, no flattening needed - Jinja handles nested dicts natively
+        return context
+
+    def _render_template(self, template: str, context: dict) -> str:
+        """Render a template string with Jinja.
+
+        Supports both simple variables and nested object access:
+        - {{ model }} - simple variable
+        - {{ config.model }} - nested object access
+
+        Args:
+            template: Template string (for name, location, etc.)
+            context: Dict of values
+
+        Returns:
+            Rendered string
+        """
+        from jinja2 import Template
+
+        jinja_template = Template(template)
+        return jinja_template.render(**context)
+
     def _escape_dbt_jinja(self, template: str) -> str:
         """Replace dbt Jinja escape sequences with temporary markers.
 
@@ -234,9 +268,12 @@ class DynamicModel:
                     manifest=self.manifest,
                 ).get_iterable()
                 for item in iterable:
-                    model = dynamic_model["name"].format(**item)
-                    location = dynamic_model["location"].format(**item)
+                    # Use Jinja for all templates (name, location, sql)
+                    # This supports both simple vars ({{ model }}) and nested objects ({{ config.model }})
+                    model = self._render_template(dynamic_model["name"], item)
+                    location = self._render_template(dynamic_model["location"], item)
                     sql = self._render_sql_with_jinja(dynamic_model["sql"], item)
+
                     if self.test_sql:
                         self._compile_and_run(sql, model)
                     self._write(model, location, sql)

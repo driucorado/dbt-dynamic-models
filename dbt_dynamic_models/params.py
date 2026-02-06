@@ -100,11 +100,59 @@ class Param:
             logger.warning(f"Falling back to raw query: {query}")
             return query
 
+    def _validate_object_values(self, param_name: str, values: list):
+        """Validate that object values have consistent keys across all items.
+
+        Args:
+            param_name: Name of the parameter for error messages
+            values: List of dict objects to validate
+
+        Raises:
+            ValueError: If objects have inconsistent keys
+        """
+        if not values or not isinstance(values[0], dict):
+            return  # Not object values, skip validation
+
+        # Get keys from first object as reference
+        reference_keys = set(values[0].keys())
+
+        # Check all subsequent objects have the same keys
+        for i, obj in enumerate(values[1:], start=1):
+            if not isinstance(obj, dict):
+                raise ValueError(
+                    f"Parameter '{param_name}' has mixed types: "
+                    f"item 0 is dict, but item {i} is {type(obj).__name__}"
+                )
+
+            obj_keys = set(obj.keys())
+
+            # Check for missing keys
+            missing_keys = reference_keys - obj_keys
+            if missing_keys:
+                logger.warning(
+                    f"Parameter '{param_name}' item {i} is missing keys: {missing_keys}. "
+                    f"Expected keys: {reference_keys}"
+                )
+
+            # Check for extra keys
+            extra_keys = obj_keys - reference_keys
+            if extra_keys:
+                logger.warning(
+                    f"Parameter '{param_name}' item {i} has extra keys: {extra_keys}. "
+                    f"Expected keys: {reference_keys}"
+                )
+
     def _format_params(self):
         params = {}
         for param in self.dynamic_model["params"]:
             if "values" in param:
-                params[param["name"]] = param["values"]
+                values = param["values"]
+
+                # Validate object values have consistent keys
+                if values and isinstance(values[0], dict):
+                    self._validate_object_values(param["name"], values)
+
+                params[param["name"]] = values
             elif "query" in param:
                 # Render Jinja templates in the query (ref, env_var, source, etc.)
                 rendered_query = self._render_jinja_query(param["query"])

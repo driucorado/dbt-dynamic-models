@@ -1,0 +1,10 @@
+{
+    "$schema": "https://opencode.ai/config.json",
+    "agent": {
+    "quick-thinker": {
+      "description": "Fast reasoning with limited iterations",
+      "prompt": "You are a quick thinker. Solve problems with minimal steps.",
+      "steps": 5
+    }
+  }
+}

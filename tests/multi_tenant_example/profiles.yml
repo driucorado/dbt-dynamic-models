@@ -1,0 +1,11 @@
+multi_tenant:
+  outputs:
+    default:
+      dbname: "{{ env_var('ERP_SOURCE_SCHEMA') }}"
+      host: eu-west-1.risingwave.sportalliance.com
+      port: 4567
+      schema: "_rs_dbt{{ env_var('RISINGWAVE_USER') }}"
+      password: "{{ env_var('RISINGWAVE_PASSWORD') }}"
+      threads: 4
+      type: risingwave
+      user: "_{{ env_var('RISINGWAVE_USER') }}"
